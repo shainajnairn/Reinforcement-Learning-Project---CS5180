@@ -1,7 +1,9 @@
 import numpy as np
 import cv2
+import torch
 
 ################ Some helper functions... ####################
+
 
 def moving_avg(x, N=500):
 
@@ -11,7 +13,7 @@ def moving_avg(x, N=500):
     x_pad_left = x[0:N]
     x_pad_right = x[-N:]
     x_pad = x_pad_left[::-1] + x + x_pad_right[::-1]
-    y = np.convolve(x_pad, np.ones(N) / N, mode='same')
+    y = np.convolve(x_pad, np.ones(N) / N, mode="same")
     return y[N:-N]
 
 
@@ -25,8 +27,8 @@ def load_bg_img(path_to_img, w, h):
 def create_circle_poly(center, radius, N=50):
     pts = []
     for i in range(N):
-        x = center[0] + radius*np.cos(i/N*2*np.pi)
-        y = center[1] + radius*np.sin(i/N*2*np.pi)
+        x = center[0] + radius * np.cos(i / N * 2 * np.pi)
+        y = center[1] + radius * np.sin(i / N * 2 * np.pi)
         pts.append([x, y])
     return pts
 
@@ -41,11 +43,17 @@ def create_ellipse_poly(center, rx, ry, N=50):
 
 def create_rectangle_poly(center, w, h):
     x0, y0 = center
-    pts = [[x0-w/2, y0+h/2], [x0+w/2, y0+h/2], [x0+w/2, y0-h/2], [x0-w/2, y0-h/2]]
+    pts = [
+        [x0 - w / 2, y0 + h / 2],
+        [x0 + w / 2, y0 + h / 2],
+        [x0 + w / 2, y0 - h / 2],
+        [x0 - w / 2, y0 - h / 2],
+    ]
     return pts
 
 
 ################ Let's do some math... ####################
+
 
 def scale_matrix(sx=1.0, sy=1.0, sz=1.0):
 
@@ -56,7 +64,8 @@ def scale_matrix(sx=1.0, sy=1.0, sz=1.0):
 
     return ScaleMatrix
 
-def rotation_matrix(rx=0., ry=0., rz=0.):
+
+def rotation_matrix(rx=0.0, ry=0.0, rz=0.0):
 
     # input should be radians (e.g., 0, pi/2, pi)
 
@@ -84,7 +93,7 @@ def rotation_matrix(rx=0., ry=0., rz=0.):
     return RotationMatrix
 
 
-def translation_matrix(tx=0., ty=0., tz=0.):
+def translation_matrix(tx=0.0, ty=0.0, tz=0.0):
 
     TranslationMatrix = np.eye(4)
     TranslationMatrix[0, -1] = tx
@@ -94,10 +103,18 @@ def translation_matrix(tx=0., ty=0., tz=0.):
     return TranslationMatrix
 
 
-def create_pose_matrix(tx=0., ty=0., tz=0.,
-                       rx=0., ry=0., rz=0.,
-                       sx=1.0, sy=1.0, sz=1.0,
-                       base_correction=np.eye(4)):
+def create_pose_matrix(
+    tx=0.0,
+    ty=0.0,
+    tz=0.0,
+    rx=0.0,
+    ry=0.0,
+    rz=0.0,
+    sx=1.0,
+    sy=1.0,
+    sz=1.0,
+    base_correction=np.eye(4),
+):
 
     # Scale matrix
     ScaleMatrix = scale_matrix(sx, sy, sz)
@@ -110,6 +127,16 @@ def create_pose_matrix(tx=0., ty=0., tz=0.,
 
     # TranslationMatrix * RotationMatrix * ScaleMatrix
     PoseMatrix = TranslationMatrix @ RotationMatrix @ ScaleMatrix @ base_correction
-    
+
     return PoseMatrix
 
+
+def get_device():
+    device = torch.device("cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+        torch.cuda.empty_cache()
+        print("Device set to : " + str(torch.cuda.get_device_name(device)))
+    else:
+        print("Device set to : cpu")
+    return device
