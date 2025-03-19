@@ -2,22 +2,9 @@ import torch
 import torch.nn as nn
 from torch.distributions import MultivariateNormal, Categorical
 import numpy as np
+import utils
 
-################################## set device ##################################
-print(
-    "============================================================================================"
-)
-# set device to cpu or cuda
-device = torch.device("cpu")
-if torch.cuda.is_available():
-    device = torch.device("cuda:0")
-    torch.cuda.empty_cache()
-    print("Device set to : " + str(torch.cuda.get_device_name(device)))
-else:
-    print("Device set to : cpu")
-print(
-    "============================================================================================"
-)
+device = utils.get_device()
 
 
 ################################## PPO Policy with minibatch ##################################
@@ -88,13 +75,7 @@ class ActorCritic(nn.Module):
             ).to(device)
         else:
             print(
-                "--------------------------------------------------------------------------------------------"
-            )
-            print(
                 "WARNING : Calling ActorCritic::set_action_std() on discrete action space policy"
-            )
-            print(
-                "--------------------------------------------------------------------------------------------"
             )
 
     def forward(self):
@@ -187,19 +168,10 @@ class PPO:
             self.policy_old.set_action_std(new_action_std)
         else:
             print(
-                "--------------------------------------------------------------------------------------------"
-            )
-            print(
                 "WARNING : Calling PPO::set_action_std() on discrete action space policy"
-            )
-            print(
-                "--------------------------------------------------------------------------------------------"
             )
 
     def decay_action_std(self, action_std_decay_rate, min_action_std):
-        print(
-            "--------------------------------------------------------------------------------------------"
-        )
         if self.has_continuous_action_space:
             self.action_std = self.action_std - action_std_decay_rate
             self.action_std = round(self.action_std, 4)
@@ -217,9 +189,6 @@ class PPO:
             print(
                 "WARNING : Calling PPO::decay_action_std() on discrete action space policy"
             )
-        print(
-            "--------------------------------------------------------------------------------------------"
-        )
 
     def select_action(self, state):
         with torch.no_grad():
