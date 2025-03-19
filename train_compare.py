@@ -1,3 +1,5 @@
+# this code can be used to train and compare two algorithms side by side.abs
+
 import os
 import numpy as np
 import torch
@@ -204,10 +206,10 @@ def train_simultaneously():
         # -----------------------------
         # Save model
         # -----------------------------
-        if time_step % save_model_freq == 0:
-            ppo_agent.save(checkpoint_path1)
-            ppo2_agent.save(checkpoint_path2)
-            print(f"[{time_step}] Models saved.")
+        # if time_step % save_model_freq == 0:
+        #     ppo_agent.save(checkpoint_path1)
+        #     ppo2_agent.save(checkpoint_path2)
+        #     print(f"[{time_step}] Models saved.")
 
         # -----------------------------
         # Print some info
