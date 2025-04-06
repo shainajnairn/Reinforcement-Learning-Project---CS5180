@@ -4,8 +4,10 @@ from datetime import datetime
 
 import torch
 import numpy as np
+import sys
 
-from PPO import PPO
+sys.path.insert(0, "PPO_agents")
+from SAFE_PPO_2 import PPO
 from rocket import Rocket
 
 
@@ -41,26 +43,28 @@ def test():
     action_dim = env.action_dims
 
     # Initialize a PPO agent
-    ppo_agent = PPO(
-        state_dim,
-        action_dim,
-        lr_actor,
-        lr_critic,
-        gamma,
-        K_epochs,
-        eps_clip,
-        has_continuous_action_space,
-    )
 
+    ppo_agent = PPO(
+        state_dim=state_dim,
+        action_dim=action_dim,
+        lr_actor=lr_actor,
+        lr_critic=lr_critic,
+        gamma=gamma,
+        cost_gamma = 0.99,
+        K_epochs=K_epochs,
+        eps_clip=eps_clip,
+        has_continuous_action_space=has_continuous_action_space,
+    )
     # Pretrained weights directory
     random_seed = 0  # Set this to load a specific checkpoint trained on a random seed
-    run_num_pretrained = 3  # Set this to load a specific checkpoint number
+    run_num_pretrained = 231  # Set this to load a specific checkpoint number
 
     directory = "./PPO_preTrained" + "/" + env_name + "/"
     checkpoint_path = directory + "PPO_{}_{}_{}.pth".format(
         env_name, random_seed, run_num_pretrained
     )
-    print("loadin  g network from : " + checkpoint_path)
+    checkpoint_path = "./PPO_logs/RocketLanding/PPO_RocketLanding_log_231.csv"
+    print("loading network from : " + checkpoint_path)
 
     # Load pretrained model
     ppo_agent.load(checkpoint_path)

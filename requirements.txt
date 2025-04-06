@@ -2,3 +2,7 @@ numpy
 matplotlib
 opencv-python
 torch
+seaborn
+scikit-learn
+tqdm
+gymnasium
