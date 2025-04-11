@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.linear_model import LinearRegression
 import sys
+
 sys.path.insert(0, "PPO_agents")
 from datetime import datetime
 
@@ -28,7 +29,7 @@ env_name = "RocketLanding"
 task = "landing"
 # Initialize Rocket environment
 env = Rocket(
-    max_steps=max_ep_len, task=task, rocket_type="starship", wind=False, wind_scale=2.0
+    max_steps=max_ep_len, task=task, rocket_type="starship", wind=True, wind_scale=2.0
 )
 
 
@@ -51,7 +52,7 @@ def train(
     Train an agent on the Rocket environment.
     Returns training metrics, including episode rewards and average rewards.
     """
-    # print(agent.__class__.__name__)
+    print(agent.__class__.__name__)
 
     if print_freq is None:
         print_freq = max_ep_len * 10  # e.g. 10000
@@ -157,22 +158,22 @@ def train(
                 log_running_reward, log_running_episodes = 0.0, 0
 
             # Print average reward to console
-            # if time_step % print_freq == 0:
-            #     if print_running_episodes > 0:
-            #         print_avg_reward = print_running_reward / print_running_episodes
-            #     else:
-            #         print_avg_reward = 0
-            #     print(
-            #         f"Episode : {i_episode} \t\t"
-            #         f"Timestep : {time_step} \t\t"
-            #         f"Average Reward : {round(print_avg_reward, 2)}"
-            #     )
-            #     print_running_reward, print_running_episodes = 0.0, 0
+            if time_step % print_freq == 0:
+                if print_running_episodes > 0:
+                    print_avg_reward = print_running_reward / print_running_episodes
+                else:
+                    print_avg_reward = 0
+                print(
+                    f"Episode : {i_episode} \t\t"
+                    f"Timestep : {time_step} \t\t"
+                    f"Average Reward : {round(print_avg_reward, 2)}"
+                )
+                print_running_reward, print_running_episodes = 0.0, 0
 
-            # # Save model checkpoint
-            # if time_step % save_model_freq == 0:
-            #     agent.save(checkpoint_path)
-            #     print("Model saved at timestep:", time_step)
+            # Save model checkpoint
+            if time_step % save_model_freq == 0:
+                agent.save(checkpoint_path)
+                print("Model saved at timestep:", time_step)
 
             if done:
                 break
@@ -239,6 +240,7 @@ def train(
 
     return metrics
 
+
 if __name__ == "__main__":
     # State and action dimensions
     state_dim = env.state_dims
@@ -272,19 +274,18 @@ if __name__ == "__main__":
         lam=lam,
     )
 
-
     ppo_safe_agent = PPO_SAFE(
         state_dim=state_dim,
         action_dim=action_dim,
         lr_actor=lr_actor,
         lr_critic=lr_critic,
         gamma=gamma,
-        cost_gamma = 0.99,
+        cost_gamma=0.99,
         K_epochs=K_epochs,
         eps_clip=eps_clip,
         has_continuous_action_space=has_continuous_action_space,
     )
-            
+
     metrics_ppo_safe = train(
         ppo_safe_agent,
         env,
@@ -293,10 +294,10 @@ if __name__ == "__main__":
         max_training_timesteps=6e6,
         convergence_threshold=200,
     )
-    
+
     with open("saved_metrics/metrics_ppo_safe.pkl", "wb") as f:
         pickle.dump(metrics_ppo_safe, f)
-    
+
     metrics_ppo_gae = train(
         ppo_gae_agent,
         env,
@@ -305,6 +306,6 @@ if __name__ == "__main__":
         max_training_timesteps=6e6,
         convergence_threshold=200,
     )
-        
+
     with open("saved_metrics/metrics_ppo_gae.pkl", "wb") as f:
         pickle.dump(metrics_ppo_gae, f)
