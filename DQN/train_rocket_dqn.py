@@ -10,7 +10,7 @@ def train_dqn(
     render_interval=50,
     device="cuda"  # or "cpu"
 ):
-    env = RocketEnv(max_steps=max_steps, task="landing", wind=True, wind_scale=2.0)
+    env = RocketEnv(max_steps=max_steps, task="landing", wind=False, wind_scale=2.0)
     state_dim = env.observation_space.shape[0]  # 8
     action_dim = env.action_space.n            # 9
     
@@ -68,5 +68,5 @@ def train_dqn(
     return episode_rewards
 
 if __name__ == "__main__":
-    rewards = train_dqn(num_episodes=500, max_steps=500, render_interval=50, device="cpu")
+    rewards = train_dqn(num_episodes=6000000, max_steps=1000, render_interval=50, device="cpu")
     # Plot or analyze rewards as needed

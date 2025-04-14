@@ -5,6 +5,7 @@ import utils
 import math
 
 import matplotlib.pyplot as plt
+
 # from stable_baselines3.common.callbacks import BaseCallback
 
 
@@ -97,6 +98,7 @@ class Rocket(object):
         self.gamma = 400.0
         self.distance_x_old = float("inf")
         self.distance_y_old = float("inf")
+        self.altitude_old = None
 
     def reset(self, state_dict=None):
         self.initial_theta = self.state["theta"]
@@ -108,6 +110,7 @@ class Rocket(object):
         self.state_buffer = []
         self.step_id = 0
         self.already_landing = False
+        self.altitude_old = None
         cv2.destroyAllWindows()
 
         # --- WIND FEATURE ---
@@ -196,7 +199,7 @@ class Rocket(object):
             vx, vy = state["vx"], state["vy"]
             theta = state["theta"]
             vtheta = state["vtheta"]
-            v = (vx*2 + vy*2) ** 0.5
+            v = (vx**2 + vy**2) ** 0.5
 
             crash = False
             if y >= self.world_y_max - self.H / 2.0:
@@ -233,101 +236,6 @@ class Rocket(object):
                 and abs(vtheta) < 10 / 180 * np.pi
             )
 
-    # def calculate_reward(self, state):
-
-    #     x_range = self.world_x_max - self.world_x_min
-    #     y_range = self.world_y_max - self.world_y_min
-
-    #     # dist between agent and target point
-    #     dist_x = abs(state['x'] - self.target_x)
-    #     dist_y = abs(state['y'] - self.target_y)
-    #     dist_norm = dist_x / x_range + dist_y / y_range
-
-    #     dist_reward = 0.1*(1.0 - dist_norm)
-
-    #     if abs(state['theta']) <= np.pi / 6.0:
-    #         pose_reward = 0.1
-    #     else:
-    #         pose_reward = abs(state['theta']) / (0.5*np.pi)
-    #         pose_reward = 0.1 * (1.0 - pose_reward)
-
-    #     reward = dist_reward + pose_reward
-
-    #     if self.task == 'hover' and (dist_x*2 + dist_y2)*0.5 <= 2*self.target_r:  # hit target
-    #         reward = 0.25
-    #     if self.task == 'hover' and (dist_x*2 + dist_y2)*0.5 <= 1*self.target_r:  # hit target
-    #         reward = 0.5
-    #     if self.task == 'hover' and abs(state['theta']) > 90 / 180 * np.pi:
-    #         reward = 0
-
-    #     v = (state['vx'] ** 2 + state['vy'] ** 2) ** 0.5
-    #     if self.task == 'landing' and self.already_crash:
-    #         reward = (reward + 5*np.exp(-1*v/10.)) * (self.max_steps - self.step_id)
-    #     if self.task == 'landing' and self.already_landing:
-    #         reward = (1.0 + 5*np.exp(-1*v/10.))*(self.max_steps - self.step_id)
-
-    #     return reward
-
-    # def calculate_reward(self, state):
-    #     """
-    #     Returns the immediate reward based on the rocket's state.
-    #     Includes scaled reward, big penalty for 360° spin,
-    #     etc., as previously shown.
-    #     """
-    #     x_range = self.world_x_max - self.world_x_min
-    #     y_range = self.world_y_max - self.world_y_min
-
-    #     # dist between agent and target point
-    #     dist_x = abs(state["x"] - self.target_x)
-    #     dist_y = abs(state["y"] - self.target_y)
-    #     dist_norm = dist_x / x_range + dist_y / y_range
-    #     dist_reward = 0.1 * (1.0 - dist_norm)
-
-    #     # pose-based reward
-    #     if abs(state["theta"]) <= np.pi / 6.0:
-    #         pose_reward = 0.1
-    #     else:
-    #         pose_factor = abs(state["theta"]) / (0.5 * np.pi)
-    #         pose_reward = 0.1 * (1.0 - pose_factor)
-
-    #     # combine base distance + pose reward
-    #     reward = dist_reward + pose_reward
-
-    #     # HOVER-SPECIFIC BONUSES
-    #     if self.task == "hover":
-    #         if (dist_x*2 + dist_y*2) ** 0.5 <= 2 * self.target_r:
-    #             reward = 0.25
-    #         if (dist_x*2 + dist_y*2) ** 0.5 <= self.target_r:
-    #             reward = 0.5
-    #         if abs(state["theta"]) > 90.0 / 180.0 * np.pi:
-    #             reward = 0
-
-    #     # LANDING-SPECIFIC REWARDS
-    #     v = (state["vx"] ** 2 + state["vy"] ** 2) ** 0.5
-    #     if self.task == "landing" and self.already_crash:
-    #         reward = (reward + 5 * np.exp(-1 * v / 10.0)) * (
-    #             self.max_steps - self.step_id
-    #         )
-    #     if self.task == "landing" and self.already_landing:
-    #         reward = (1.0 + 5 * np.exp(-1 * v / 10.0)) * (self.max_steps - self.step_id)
-
-    #     # 1) Scale up the entire reward
-    #     reward *= 2.0
-
-    #     # 2) Huge negative penalty if the rocket spins a full 360°
-    #     current_spin = abs(state["theta"] - self.initial_theta)
-    #     if current_spin >= 2.0 * np.pi:
-    #         reward -= 1000.0
-
-    #     # 3) Penalize rocket for moving away from the target horizontally
-    #     if self.task == "landing":
-    #         if state["x"] < self.target_x and state["vx"] < 0.0:
-    #             reward -= 5.0
-    #         elif state["x"] > self.target_x and state["vx"] > 0.0:
-    #             reward -= 5.0
-
-    #     return reward
-
     def calculate_reward(self, state):
         """A more 'guided' reward than the previous snippet,
         with extra shaping for angle and velocity."""
@@ -341,13 +249,27 @@ class Rocket(object):
         theta, vtheta = state["theta"], state["vtheta"]
         speed = math.sqrt(vx**2 + vy**2)
 
+        altitude = y - (self.H / 2.0)
+        reward = 0.0
+
         # 1) Distance-based shaping
         dist_x = (self.target_x - x) ** 2
         dist_y = (self.target_y - y) ** 2
         distance = math.sqrt(dist_x + dist_y)
 
+        if self.altitude_old is not None:
+            if altitude < self.altitude_old:
+                # reward for descending a little
+                reward += 0.05
+            else:
+                # penalty if going up
+                reward -= 0.02
+        self.altitude_old = altitude
+
+        altitude_threshold = 50.0
+        scaling_factor = 0.2 if altitude > altitude_threshold else 1.0
+
         # We'll keep track of the old distances to see if we improved
-        reward = 0.0
         if dist_x <= self.distance_x_old:
             self.distance_x_old = dist_x
             if dist_y <= self.distance_y_old:
@@ -359,38 +281,26 @@ class Rocket(object):
             reward -= 0.01
 
         # 2) Angle shaping:
-        #    Encourage rocket to stay more or less upright (|theta| < ~30�)
-        #    This is separate from the \u201cstress check,\u201d which is more extreme (|theta| < 90�).
         max_upright_angle_deg = 30.0
         max_upright_angle_rad = math.radians(max_upright_angle_deg)
         if abs(theta) < max_upright_angle_rad:
-            # A small positive reward for staying within �30�
-            reward += 0.5
+            reward += 0.5 * scaling_factor
         else:
-            # Gradually penalize large angles
-            # (the further from upright, the bigger the penalty)
-            # e.g. 0.01 * degrees_excess
             degrees_excess = math.degrees(abs(theta) - max_upright_angle_rad)
-            reward -= 0.01 * max(0.0, degrees_excess)
+            reward -= 0.01 * max(0.0, degrees_excess) * scaling_factor
 
-        # 3) Velocity shaping:
-        #    We lightly reward smaller speeds and lightly penalize bigger speeds
-        #    That helps guide the rocket to approach slowly.
-        #    E.g. speed < 5 => slight reward, speed > 15 => penalty
+        # 3) Velocity shaping
         if speed < 5:
-            reward += 0.5
+            reward += 0.5 * scaling_factor
         elif speed > 15:
-            reward -= 0.01 * (speed - 15.0)  # bigger penalty the faster it goes
+            reward -= 0.01 * (speed - 15.0) * scaling_factor
 
-        # 4) Spin rate shaping:
-        #    Encourage the rocket to have a low angular velocity
-        #    e.g. below ~90 deg/s => small reward
+        # 4) Spin rate shaping
         spin_rate_deg_s = math.degrees(abs(vtheta))
         if spin_rate_deg_s < 90.0:
-            reward += 0.5
+            reward += 0.5 * scaling_factor
         else:
-            # penalize large spin
-            reward -= 0.01 * (spin_rate_deg_s - 90.0)
+            reward -= 0.01 * (spin_rate_deg_s - 90.0) * scaling_factor
 
         # 5) Domain escape / stress / impact
         #    Big negative for escaping or high stress or impact
@@ -405,6 +315,7 @@ class Rocket(object):
         if self.check_landing_success(state):
             reward += 100.0
 
+        reward -= 0.001
         return reward
 
     def _detected_escape(self, state):
