@@ -94,7 +94,7 @@ class Rocket(object):
         self.wind_x = 0.0
         self.wind_y = 0.0
 
-        self.gamma = 100.0
+        self.gamma = 400.0
         self.distance_x_old = float("inf")
         self.distance_y_old = float("inf")
 
@@ -219,111 +219,15 @@ class Rocket(object):
             vx, vy = state["vx"], state["vy"]
             theta = state["theta"]
             vtheta = state["vtheta"]
-            v = (vx**2 + vy**2) ** 0.5
+            speed = (vx**2 + vy**2) ** 0.5
+            
             return (
                 y <= 0 + self.H / 2.0
-                and v < 15.0
+                and speed < 15.0
                 and abs(x) < self.target_r
                 and abs(theta) < 10 / 180 * np.pi
                 and abs(vtheta) < 10 / 180 * np.pi
             )
-
-    # def calculate_reward(self, state):
-
-    #     x_range = self.world_x_max - self.world_x_min
-    #     y_range = self.world_y_max - self.world_y_min
-
-    #     # dist between agent and target point
-    #     dist_x = abs(state['x'] - self.target_x)
-    #     dist_y = abs(state['y'] - self.target_y)
-    #     dist_norm = dist_x / x_range + dist_y / y_range
-
-    #     dist_reward = 0.1*(1.0 - dist_norm)
-
-    #     if abs(state['theta']) <= np.pi / 6.0:
-    #         pose_reward = 0.1
-    #     else:
-    #         pose_reward = abs(state['theta']) / (0.5*np.pi)
-    #         pose_reward = 0.1 * (1.0 - pose_reward)
-
-    #     reward = dist_reward + pose_reward
-
-    #     if self.task == 'hover' and (dist_x**2 + dist_y**2)**0.5 <= 2*self.target_r:  # hit target
-    #         reward = 0.25
-    #     if self.task == 'hover' and (dist_x**2 + dist_y**2)**0.5 <= 1*self.target_r:  # hit target
-    #         reward = 0.5
-    #     if self.task == 'hover' and abs(state['theta']) > 90 / 180 * np.pi:
-    #         reward = 0
-
-    #     v = (state['vx'] ** 2 + state['vy'] ** 2) ** 0.5
-    #     if self.task == 'landing' and self.already_crash:
-    #         reward = (reward + 5*np.exp(-1*v/10.)) * (self.max_steps - self.step_id)
-    #     if self.task == 'landing' and self.already_landing:
-    #         reward = (1.0 + 5*np.exp(-1*v/10.))*(self.max_steps - self.step_id)
-
-    #     return reward
-
-    # def calculate_reward(self, state):
-    #     """
-    #     Returns the immediate reward based on the rocket's state.
-    #     Includes scaled reward, big penalty for 360° spin,
-    #     etc., as previously shown.
-    #     """
-    #     x_range = self.world_x_max - self.world_x_min
-    #     y_range = self.world_y_max - self.world_y_min
-
-    #     # dist between agent and target point
-    #     dist_x = abs(state["x"] - self.target_x)
-    #     dist_y = abs(state["y"] - self.target_y)
-    #     dist_norm = dist_x / x_range + dist_y / y_range
-    #     dist_reward = 0.1 * (1.0 - dist_norm)
-
-    #     # pose-based reward
-    #     if abs(state["theta"]) <= np.pi / 6.0:
-    #         pose_reward = 0.1
-    #     else:
-    #         pose_factor = abs(state["theta"]) / (0.5 * np.pi)
-    #         pose_reward = 0.1 * (1.0 - pose_factor)
-
-    #     # combine base distance + pose reward
-    #     reward = dist_reward + pose_reward
-
-    #     # HOVER-SPECIFIC BONUSES
-    #     if self.task == "hover":
-    #         if (dist_x**2 + dist_y**2) ** 0.5 <= 2 * self.target_r:
-    #             reward = 0.25
-    #         if (dist_x**2 + dist_y**2) ** 0.5 <= self.target_r:
-    #             reward = 0.5
-    #         if abs(state["theta"]) > 90.0 / 180.0 * np.pi:
-    #             reward = 0
-
-    #     # LANDING-SPECIFIC REWARDS
-    #     v = (state["vx"] ** 2 + state["vy"] ** 2) ** 0.5
-    #     if self.task == "landing" and self.already_crash:
-    #         reward = (reward + 5 * np.exp(-1 * v / 10.0)) * (
-    #             self.max_steps - self.step_id
-    #         )
-    #     if self.task == "landing" and self.already_landing:
-    #         reward = (1.0 + 5 * np.exp(-1 * v / 10.0)) * (self.max_steps - self.step_id)
-
-    #     # 1) Scale up the entire reward
-    #     reward *= 2.0
-
-    #     # 2) Huge negative penalty if the rocket spins a full 360°
-    #     current_spin = abs(state["theta"] - self.initial_theta)
-    #     if current_spin >= 2.0 * np.pi:
-    #         reward -= 1000.0
-
-    #     # 3) Penalize rocket for moving away from the target horizontally
-    #     if self.task == "landing":
-    #         if state["x"] < self.target_x and state["vx"] < 0.0:
-    #             reward -= 5.0
-    #         elif state["x"] > self.target_x and state["vx"] > 0.0:
-    #             reward -= 5.0
-
-    #     return reward
-
-
 
     def calculate_reward(self, state):
         """A more 'guided' reward than the previous snippet,
@@ -362,7 +266,7 @@ class Rocket(object):
         max_upright_angle_rad = math.radians(max_upright_angle_deg)
         if abs(theta) < max_upright_angle_rad:
             # A small positive reward for staying within �30�
-            reward += 0.05
+            reward += 0.5
         else:
             # Gradually penalize large angles
             # (the further from upright, the bigger the penalty)
@@ -375,7 +279,7 @@ class Rocket(object):
         #    That helps guide the rocket to approach slowly.
         #    E.g. speed < 5 => slight reward, speed > 15 => penalty
         if speed < 5:
-            reward += 0.05
+            reward += 0.5
         elif speed > 15:
             reward -= 0.01 * (speed - 15.0)  # bigger penalty the faster it goes
 
@@ -384,7 +288,7 @@ class Rocket(object):
         #    e.g. below ~90 deg/s => small reward
         spin_rate_deg_s = math.degrees(abs(vtheta))
         if spin_rate_deg_s < 90.0:
-            reward += 0.05
+            reward += 0.5
         else:
             # penalize large spin
             reward -= 0.01 * (spin_rate_deg_s - 90.0)
@@ -403,8 +307,6 @@ class Rocket(object):
             reward += 100.0
 
         return reward
-
-
 
     def _detected_escape(self, state):
         """Returns True if rocket is outside the world bounds."""
