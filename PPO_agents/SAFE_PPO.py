@@ -1,359 +1,327 @@
 import torch
 import torch.nn as nn
+from torch.distributions import MultivariateNormal
 from torch.distributions import Categorical
-import numpy as np
+import utils
 
+device = utils.get_device()
 
-#  ROLLOUT BUFFER
-class SafeRolloutBuffer:
+################################## Safe PPO Policy ##################################
+class RolloutBuffer:
     def __init__(self):
-        self.states = []
         self.actions = []
-        self.rewards = []
-        self.costs = []  # <--- new
+        self.states = []
         self.logprobs = []
-        self.value_r = []  # predicted reward value
-        self.value_c = []  # predicted cost value
+        self.rewards = []
+        self.state_values = []
         self.is_terminals = []
-
+        self.cost_values = []  # Cost values for safety constraints
+        self.costs = []  # Costs received from environment
+    
     def clear(self):
-        del self.states[:]
         del self.actions[:]
-        del self.rewards[:]
-        del self.costs[:]  # <--- new
+        del self.states[:]
         del self.logprobs[:]
-        del self.value_r[:]
-        del self.value_c[:]
+        del self.rewards[:]
+        del self.state_values[:]
         del self.is_terminals[:]
+        del self.cost_values[:]
+        del self.costs[:]
 
 
-#  ACTOR-CRITIC NETWORK
 class SafeActorCritic(nn.Module):
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, state_dim, action_dim, has_continuous_action_space, action_std_init):
         super(SafeActorCritic, self).__init__()
 
-        # For discrete actions, we have an actor that outputs a probability distribution
-        hidden_size = 64
-
-        # Actor (same as your normal PPO code)
-        self.actor = nn.Sequential(
-            nn.Linear(state_dim, hidden_size),
+        self.has_continuous_action_space = has_continuous_action_space
+        
+        if has_continuous_action_space:
+            self.action_dim = action_dim
+            self.action_var = torch.full((action_dim,), action_std_init * action_std_init).to(device)
+        
+        # Actor network
+        if has_continuous_action_space:
+            self.actor = nn.Sequential(
+                nn.Linear(state_dim, 64),
+                nn.Tanh(),
+                nn.Linear(64, 64),
+                nn.Tanh(),
+                nn.Linear(64, action_dim),
+                nn.Tanh()
+            )
+        else:
+            self.actor = nn.Sequential(
+                nn.Linear(state_dim, 64),
+                nn.Tanh(),
+                nn.Linear(64, 64),
+                nn.Tanh(),
+                nn.Linear(64, action_dim),
+                nn.Softmax(dim=-1)
+            )
+        
+        # Value Critic network (for rewards)
+        self.critic = nn.Sequential(
+            nn.Linear(state_dim, 64),
             nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(64, 64),
             nn.Tanh(),
-            nn.Linear(hidden_size, action_dim),
-            nn.Softmax(dim=-1),
+            nn.Linear(64, 1)
         )
-
-        # Critic for reward
-        self.critic_r = nn.Sequential(
-            nn.Linear(state_dim, hidden_size),
+        
+        # Cost Critic network (for safety constraints)
+        self.cost_critic = nn.Sequential(
+            nn.Linear(state_dim, 64),
             nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(64, 64),
             nn.Tanh(),
-            nn.Linear(hidden_size, 1),
+            nn.Linear(64, 1)
         )
-
-        # Critic for cost
-        self.critic_c = nn.Sequential(
-            nn.Linear(state_dim, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, 1),
-        )
+        
+    def set_action_std(self, new_action_std):
+        if self.has_continuous_action_space:
+            self.action_var = torch.full((self.action_dim,), new_action_std * new_action_std).to(device)
+        else:
+            print("--------------------------------------------------------------------------------------------")
+            print("WARNING : Calling SafeActorCritic::set_action_std() on discrete action space policy")
+            print("--------------------------------------------------------------------------------------------")
 
     def forward(self):
-        # Not used directly; we use act() and evaluate().
         raise NotImplementedError
-
+    
     def act(self, state):
-        """
-        Given a single state, returns:
-          - action sampled from pi(.|state)
-          - log prob of that action
-          - reward value function for that state
-          - cost  value function for that state
-        """
-        action_probs = self.actor(state)
-        dist = Categorical(action_probs)
+        if self.has_continuous_action_space:
+            action_mean = self.actor(state)
+            cov_mat = torch.diag(self.action_var).unsqueeze(dim=0)
+            dist = MultivariateNormal(action_mean, cov_mat)
+        else:
+            action_probs = self.actor(state)
+            dist = Categorical(action_probs)
+
         action = dist.sample()
-        logprob = dist.log_prob(action)
+        action_logprob = dist.log_prob(action)
+        state_val = self.critic(state)
+        cost_val = self.cost_critic(state)
 
-        value_r = self.critic_r(state)
-        value_c = self.critic_c(state)
-
-        return action, logprob, value_r, value_c
-
-    def evaluate(self, states, actions):
-        """
-        Evaluates a batch of states & actions:
-          - log p(a|s)
-          - reward value function
-          - cost value function
-          - distribution entropy
-        """
-        action_probs = self.actor(states)
-        dist = Categorical(action_probs)
-
-        logprobs = dist.log_prob(actions)
+        return action.detach(), action_logprob.detach(), state_val.detach(), cost_val.detach()
+    
+    def evaluate(self, state, action):
+        if self.has_continuous_action_space:
+            action_mean = self.actor(state)
+            
+            action_var = self.action_var.expand_as(action_mean)
+            cov_mat = torch.diag_embed(action_var).to(device)
+            dist = MultivariateNormal(action_mean, cov_mat)
+            
+            # For Single Action Environments.
+            if self.action_dim == 1:
+                action = action.reshape(-1, self.action_dim)
+        else:
+            action_probs = self.actor(state)
+            dist = Categorical(action_probs)
+            
+        action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
+        state_values = self.critic(state)
+        cost_values = self.cost_critic(state)
+        
+        return action_logprobs, state_values, cost_values, dist_entropy
 
-        value_r = self.critic_r(states).squeeze(-1)  # shape (batch,)
-        value_c = self.critic_c(states).squeeze(-1)  # shape (batch,)
 
-        return logprobs, value_r, value_c, dist_entropy
-
-
-#  SAFE PPO AGENT
 class PPO:
-    def __init__(
-        self,
-        state_dim,
-        action_dim,
-        lr_actor=3e-4,
-        lr_critic=3e-4,
-        gamma=0.99,
-        lam=0.95,
-        eps_clip=0.2,
-        K_epochs=10,
-        cost_limit=0.1,
-        alpha_lr=1e-2,
-    ):
-        """
-        Args:
-          state_dim:  dimension of observation vector
-          action_dim: number of discrete actions
-          lr_actor, lr_critic:  learning rates
-          gamma: discount factor for reward/cost
-          lam:   GAE lambda
-          eps_clip: PPO clip parameter
-          K_epochs: number of optimization epochs per update
-          cost_limit: desired upper bound on average cost
-          alpha_lr:   step size for Lagrange multiplier
-        """
+    def __init__(self, state_dim, action_dim, lr_actor, lr_critic, gamma, cost_gamma, K_epochs, 
+                 eps_clip, has_continuous_action_space, cost_limit=25.0, lagrangian_multiplier_init=0.01, 
+                 action_std_init=0.6):
+
+        self.has_continuous_action_space = has_continuous_action_space
+
+        if has_continuous_action_space:
+            self.action_std = action_std_init
+
         self.gamma = gamma
-        self.lam = lam
+        self.cost_gamma = cost_gamma
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
+        
+        # Safety constraint parameters
+        self.cost_limit = cost_limit  # Maximum allowed cost
+        self.lagrangian_multiplier = lagrangian_multiplier_init  # Lagrangian multiplier
+        self.lambda_lr = 0.99  # Learning rate for Lagrangian multiplier
+        
+        self.buffer = RolloutBuffer()
 
-        self.buffer = SafeRolloutBuffer()
+        self.policy = SafeActorCritic(state_dim, action_dim, has_continuous_action_space, action_std_init).to(device)
+        self.optimizer = torch.optim.Adam([
+            {'params': self.policy.actor.parameters(), 'lr': lr_actor},
+            {'params': self.policy.critic.parameters(), 'lr': lr_critic},
+            {'params': self.policy.cost_critic.parameters(), 'lr': lr_critic}
+        ])
 
-        self.policy = SafeActorCritic(state_dim, action_dim)
-        self.policy_old = SafeActorCritic(state_dim, action_dim)
+        self.policy_old = SafeActorCritic(state_dim, action_dim, has_continuous_action_space, action_std_init).to(device)
         self.policy_old.load_state_dict(self.policy.state_dict())
+        
+        self.MseLoss = nn.MSELoss()
+        self.name = "PPO_SAFE_2"
+            
+    def set_action_std(self, new_action_std):
+        if self.has_continuous_action_space:
+            self.action_std = new_action_std
+            self.policy.set_action_std(new_action_std)
+            self.policy_old.set_action_std(new_action_std)
+        else:
+            print("--------------------------------------------------------------------------------------------")
+            print("WARNING : Calling SafePPO::set_action_std() on discrete action space policy")
+            print("--------------------------------------------------------------------------------------------")
 
-        # Combine parameters from all networks for one optimizer
-        self.optimizer = torch.optim.Adam(
-            [
-                {"params": self.policy.actor.parameters(), "lr": lr_actor},
-                {"params": self.policy.critic_r.parameters(), "lr": lr_critic},
-                {"params": self.policy.critic_c.parameters(), "lr": lr_critic},
-            ]
-        )
+    def decay_action_std(self, action_std_decay_rate, min_action_std):
+        print("--------------------------------------------------------------------------------------------")
+        if self.has_continuous_action_space:
+            self.action_std = self.action_std - action_std_decay_rate
+            self.action_std = round(self.action_std, 4)
+            if (self.action_std <= min_action_std):
+                self.action_std = min_action_std
+                print("setting actor output action_std to min_action_std : ", self.action_std)
+            else:
+                print("setting actor output action_std to : ", self.action_std)
+            self.set_action_std(self.action_std)
 
-        self.mse_loss = nn.MSELoss()
-
-        # Safe RL additions
-        self.alpha = 0.0  # Lagrange multiplier
-        self.alpha_lr = alpha_lr  # step size to update alpha
-        self.cost_limit = cost_limit
-
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.policy.to(self.device)
-        self.policy_old.to(self.device)
-        self.name = "PPO_SAFE"
+        else:
+            print("WARNING : Calling SafePPO::decay_action_std() on discrete action space policy")
+        print("--------------------------------------------------------------------------------------------")
 
     def select_action(self, state):
-        """Selects an action given state, using old policy for sampling."""
-        with torch.no_grad():
-            state_t = torch.FloatTensor(state).to(self.device)
-            action, logprob, value_r, value_c = self.policy_old.act(state_t)
+        if self.has_continuous_action_space:
+            with torch.no_grad():
+                state = torch.FloatTensor(state).to(device)
+                action, action_logprob, state_val, cost_val = self.policy_old.act(state)
 
-        self.buffer.states.append(state_t)
-        self.buffer.actions.append(action)
-        self.buffer.logprobs.append(logprob)
-        self.buffer.value_r.append(value_r)
-        self.buffer.value_c.append(value_c)
+            self.buffer.states.append(state)
+            self.buffer.actions.append(action)
+            self.buffer.logprobs.append(action_logprob)
+            self.buffer.state_values.append(state_val)
+            self.buffer.cost_values.append(cost_val)
 
-        return action.item()
+            return action.detach().cpu().numpy().flatten()
+        else:
+            with torch.no_grad():
+                state = torch.FloatTensor(state).to(device)
+                action, action_logprob, state_val, cost_val = self.policy_old.act(state)
+            
+            self.buffer.states.append(state)
+            self.buffer.actions.append(action)
+            self.buffer.logprobs.append(action_logprob)
+            self.buffer.state_values.append(state_val)
+            self.buffer.cost_values.append(cost_val)
+
+            return action.item()
 
     def update(self):
-        """
-        Run one PPO update (with K_epochs) on the entire buffer.
-        Includes Lagrange-based penalty for costs.
-        """
-        # Convert lists to tensors
-        old_states = torch.stack(self.buffer.states, dim=0).to(self.device).detach()
-        old_actions = torch.stack(self.buffer.actions, dim=0).to(self.device).detach()
-        old_logprobs = torch.stack(self.buffer.logprobs, dim=0).to(self.device).detach()
-        old_values_r = (
-            torch.stack(self.buffer.value_r, dim=0).to(self.device).detach().squeeze(-1)
-        )
-        old_values_c = (
-            torch.stack(self.buffer.value_c, dim=0).to(self.device).detach().squeeze(-1)
-        )
+        # Monte Carlo estimate of returns
+        rewards = []
+        discounted_reward = 0
+        for reward, is_terminal in zip(reversed(self.buffer.rewards), reversed(self.buffer.is_terminals)):
+            if is_terminal:
+                discounted_reward = 0
+            discounted_reward = reward + (self.gamma * discounted_reward)
+            rewards.insert(0, discounted_reward)
+            
+        # Monte Carlo estimate of costs
+        costs = []
+        discounted_cost = 0
+        for cost, is_terminal in zip(reversed(self.buffer.costs), reversed(self.buffer.is_terminals)):
+            if is_terminal:
+                discounted_cost = 0
+            discounted_cost = cost + (self.cost_gamma * discounted_cost)
+            costs.insert(0, discounted_cost)
+        
+        # Normalizing the rewards and costs
+        rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
+        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
+        
+        costs = torch.tensor(costs, dtype=torch.float32).to(device)
+        costs = (costs - costs.mean()) / (costs.std() + 1e-7)
+        
+        # Convert list to tensor
+        old_states = torch.squeeze(torch.stack(self.buffer.states, dim=0)).detach().to(device)
+        old_actions = torch.squeeze(torch.stack(self.buffer.actions, dim=0)).detach().to(device)
+        old_logprobs = torch.squeeze(torch.stack(self.buffer.logprobs, dim=0)).detach().to(device)
+        old_state_values = torch.squeeze(torch.stack(self.buffer.state_values, dim=0)).detach().to(device)
+        old_cost_values = torch.squeeze(torch.stack(self.buffer.cost_values, dim=0)).detach().to(device)
 
-        rewards = np.array(self.buffer.rewards, dtype=np.float32)
-        costs = np.array(self.buffer.costs, dtype=np.float32)
-        dones = np.array(self.buffer.is_terminals, dtype=np.bool_)
+        # Calculate advantages
+        advantages = rewards.detach() - old_state_values.detach()
+        
+        # Calculate cost advantages
+        cost_advantages = costs.detach() - old_cost_values.detach()
+        
+        # Calculate mean cost
+        mean_cost = costs.mean().item()
+        
+        # Use raw cost sum instead of normalized costs for constraint violation
+        raw_cost_mean = sum(self.buffer.costs) / len(self.buffer.costs)
+        cost_violation = raw_cost_mean - self.cost_limit
 
-        # ----------------------------
-        # Compute reward advantages (GAE)
-        # ----------------------------
-        advantages_r = []
-        gae_r = 0.0
-        next_value_r = 0.0
-        for i in reversed(range(len(rewards))):
-            if dones[i]:
-                next_value_r = 0.0
-                gae_r = 0.0
-            delta_r = rewards[i] + self.gamma * next_value_r - old_values_r[i].item()
-            gae_r = delta_r + self.gamma * self.lam * gae_r
-            advantages_r.insert(0, gae_r)
-            next_value_r = old_values_r[i].item()
-        advantages_r = torch.tensor(
-            advantages_r, dtype=torch.float32, device=self.device
-        )
-        returns_r = advantages_r + old_values_r
-
-        # Compute cost advantages (GAE)
-        advantages_c = []
-        gae_c = 0.0
-        next_value_c = 0.0
-        for i in reversed(range(len(costs))):
-            if dones[i]:
-                next_value_c = 0.0
-                gae_c = 0.0
-            delta_c = costs[i] + self.gamma * next_value_c - old_values_c[i].item()
-            gae_c = delta_c + self.gamma * self.lam * gae_c
-            advantages_c.insert(0, gae_c)
-            next_value_c = old_values_c[i].item()
-        advantages_c = torch.tensor(
-            advantages_c, dtype=torch.float32, device=self.device
-        )
-        returns_c = advantages_c + old_values_c
-
-        # Normalize the reward advantage if desired
-        advantages_r = (advantages_r - advantages_r.mean()) / (
-            advantages_r.std() + 1e-8
-        )
-
-        advantages_c = (advantages_c - advantages_c.mean()) / (
-            advantages_c.std() + 1e-8
-        )
-
-        #  PPO TRAINING
+        # Update with larger learning rate and ensure it responds to violation
+        self.lambda_lr = 0.5  # Increase from 0.05
+        self.lagrangian_multiplier = max(0.0, self.lagrangian_multiplier + self.lambda_lr * cost_violation)
+        print(f"Cost violation: {cost_violation:.2f}, Updated lambda: {self.lagrangian_multiplier:.6f}")
+        
+        # Optimize policy for K epochs
         for _ in range(self.K_epochs):
-            logprobs, v_r, v_c, dist_entropy = self.policy.evaluate(
-                old_states, old_actions
-            )
+            # Evaluating old actions and values
+            logprobs, state_values, cost_values, dist_entropy = self.policy.evaluate(old_states, old_actions)
 
-            # ratio for clipping
+            # Match state_values tensor dimensions with rewards tensor
+            state_values = torch.squeeze(state_values)
+            cost_values = torch.squeeze(cost_values)
+            
+            # Finding the ratio (pi_theta / pi_theta__old)
             ratios = torch.exp(logprobs - old_logprobs.detach())
 
-            # surrogates
-            surr1 = ratios * (advantages_r - self.alpha * advantages_c)
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * (
-                advantages_r - self.alpha * advantages_c
-            )
-
-            # final objective
-            actor_loss = -torch.min(surr1, surr2).mean()  # note the negative sign
-
-            # critic (reward)
-            critic_loss_r = self.mse_loss(v_r, returns_r)
-            # critic (cost)
-            critic_loss_c = self.mse_loss(v_c, returns_c)
-
-            loss = (
-                actor_loss
-                + 0.5 * (critic_loss_r + critic_loss_c)
-                - 0.01 * dist_entropy.mean()
-            )
-
+            # Finding Surrogate Loss for rewards
+            surr1 = ratios * advantages
+            surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages
+            
+            # Finding Surrogate Loss for costs
+            cost_surr = ratios * cost_advantages
+            
+            # Final loss of constrained objective PPO
+            loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(state_values, rewards) \
+                   + 0.5 * self.MseLoss(cost_values, costs) \
+                   + self.lagrangian_multiplier * cost_surr \
+                   - 0.01 * dist_entropy
+            
+            # Take gradient step
             self.optimizer.zero_grad()
-            loss.backward()
-            # gradient clipping if desired
-            nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+            loss.mean().backward()
             self.optimizer.step()
-
+            
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
 
-        # Update Lagrange multiplier alpha
-        # measure average cost in the batch
-        avg_cost = float(costs.mean())
-        # simple primal-dual ascent on alpha
-        self.alpha += self.alpha_lr * (avg_cost - self.cost_limit)
-        # alpha should never be negative
-        self.alpha = max(self.alpha, 0.0)
-
         # Clear buffer
         self.buffer.clear()
-
-        return avg_cost  # might help logging, e.g. how we track cost per update
-
-    def save(self, path):
-        torch.save(self.policy.state_dict(), path)
-
-    def load(self, path):
-        self.policy.load_state_dict(torch.load(path, map_location=self.device))
-        self.policy_old.load_state_dict(torch.load(path, map_location=self.device))
-
-
-###################################################
-#  TRAINING LOOP EXAMPLE (PSEUDOCODE)
-###################################################
-def train_safe_ppo(env, max_episodes=2000, max_timesteps=1500):
-    # hyperparams
-    state_dim = env.state_dims
-    action_dim = env.action_dims
-    agent = SafePPO(
-        state_dim=state_dim,
-        action_dim=action_dim,
-        lr_actor=3e-4,
-        lr_critic=3e-4,
-        gamma=0.99,
-        lam=0.95,
-        eps_clip=0.2,
-        K_epochs=10,
-        cost_limit=0.1,
-        alpha_lr=0.01,
-    )
-
-    for ep in range(max_episodes):
-        state = env.reset()
-        episode_reward = 0
-        episode_cost = 0
-
-        for t in range(max_timesteps):
-            action = agent.select_action(state)
-            next_state, reward, done, info = env.step(action)
-
-            # gather transition
-            agent.buffer.rewards.append(reward)
-            cost = (
-                info["cost"] if "cost" in info else (1.0 if env.already_crash else 0.0)
-            )
-            agent.buffer.costs.append(cost)
-            agent.buffer.is_terminals.append(done)
-
-            state = next_state
-            episode_reward += reward
-            episode_cost += cost
-
-            if done:
-                break
-
-        # Update once per episode
-        avg_cost = agent.update()
-
-        print(
-            f"Episode {ep}, reward={episode_reward:.2f}, ep_cost={episode_cost}, "
-            f"avg_cost_in_update={avg_cost:.3f}, alpha={agent.alpha:.3f}"
-        )
-
-    # You can save the final policy
-    agent.save("safe_ppo_final.pth")
-    return agent
+        
+        return mean_cost, self.lagrangian_multiplier
+            
+    def save(self, checkpoint_path):
+        # Save model state with the Lagrangian multiplier
+        torch.save({
+            'model_state_dict': self.policy_old.state_dict(),
+            'lagrangian_multiplier': self.lagrangian_multiplier,
+            'cost_limit': self.cost_limit
+        }, checkpoint_path)
+   
+    def load(self, checkpoint_path):
+        # Load the saved state
+        checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
+        
+        # Load model state
+        self.policy_old.load_state_dict(checkpoint['model_state_dict'])
+        self.policy.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Load Lagrangian multiplier and cost limit if available
+        if 'lagrangian_multiplier' in checkpoint:
+            self.lagrangian_multiplier = checkpoint['lagrangian_multiplier']
+        
+        if 'cost_limit' in checkpoint:
+            self.cost_limit = checkpoint['cost_limit']
