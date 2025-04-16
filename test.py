@@ -7,7 +7,9 @@ import numpy as np
 import sys
 
 sys.path.insert(0, "PPO_agents")
-from SAFE_PPO_2 import PPO
+from SAFE_PPO import PPO as PPO_SAFE
+from PPO_GAE import PPO as PPO_GAE
+
 from rocket import Rocket
 
 
@@ -31,6 +33,7 @@ def test():
 
     lr_actor = 0.0003  # Learning rate for actor
     lr_critic = 0.001  # Learning rate for critic
+    lam = 0.95
     #####################################################
 
     # Initialize the Rocket environment
@@ -44,26 +47,39 @@ def test():
 
     # Initialize a PPO agent
 
-    ppo_agent = PPO(
-        state_dim=state_dim,
-        action_dim=action_dim,
-        lr_actor=lr_actor,
-        lr_critic=lr_critic,
-        gamma=gamma,
-        cost_gamma = 0.99,
-        K_epochs=K_epochs,
-        eps_clip=eps_clip,
-        has_continuous_action_space=has_continuous_action_space,
+    # ppo_agent = PPO_SAFE(
+    #     state_dim=state_dim,
+    #     action_dim=action_dim,
+    #     lr_actor=lr_actor,
+    #     lr_critic=lr_critic,
+    #     gamma=gamma,
+    #     cost_gamma=0.99,
+    #     K_epochs=K_epochs,
+    #     eps_clip=eps_clip,
+    #     has_continuous_action_space=has_continuous_action_space,
+    # )
+
+    ppo_agent = PPO_GAE(
+        state_dim,
+        action_dim,
+        lr_actor,
+        lr_critic,
+        gamma,
+        K_epochs,
+        eps_clip,
+        has_continuous_action_space,
+        lam=lam,
     )
+
     # Pretrained weights directory
     random_seed = 0  # Set this to load a specific checkpoint trained on a random seed
-    run_num_pretrained = 231  # Set this to load a specific checkpoint number
+    run_num_pretrained = 266 # Set this to load a specific checkpoint number
 
     directory = "./PPO_preTrained" + "/" + env_name + "/"
     checkpoint_path = directory + "PPO_{}_{}_{}.pth".format(
         env_name, random_seed, run_num_pretrained
     )
-    checkpoint_path = "./PPO_logs/RocketLanding/PPO_RocketLanding_log_231.csv"
+    # checkpoint_path = "./PPO_logs/RocketLanding/PPO_RocketLanding_log_264.csv"
     print("loading network from : " + checkpoint_path)
 
     # Load pretrained model
@@ -94,7 +110,7 @@ def test():
         test_running_reward += ep_reward
         print("Episode: {} \t\t Reward: {}".format(ep, round(ep_reward, 2)))
 
-    env.close()
+    # env.close()
 
     avg_test_reward = test_running_reward / total_test_episodes
     print("average test reward : " + str(round(avg_test_reward, 2)))
