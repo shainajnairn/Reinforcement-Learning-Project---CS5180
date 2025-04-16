@@ -13,7 +13,7 @@ from PPO import PPO
 from PPO_MINI import PPO as PPO_MINI
 from PPO_MINI_GAE import PPO as PPO_MINI_GAE
 from PPO_GAE import PPO as PPO_GAE
-from SAFE_PPO_2 import PPO as PPO_SAFE
+from SAFE_PPO import PPO as PPO_SAFE
 
 from rocket import Rocket
 
@@ -137,8 +137,8 @@ def train(
             pbar.update(1)
 
             # Render if needed
-            if render and i_episode % 50 == 0:
-                env.render()
+            # if render and i_episode % 50 == 0:
+            #     env.render()
 
             # Update PPO
             if time_step % update_timestep == 0:
@@ -158,22 +158,22 @@ def train(
                 log_running_reward, log_running_episodes = 0.0, 0
 
             # Print average reward to console
-            if time_step % print_freq == 0:
-                if print_running_episodes > 0:
-                    print_avg_reward = print_running_reward / print_running_episodes
-                else:
-                    print_avg_reward = 0
-                print(
-                    f"Episode : {i_episode} \t\t"
-                    f"Timestep : {time_step} \t\t"
-                    f"Average Reward : {round(print_avg_reward, 2)}"
-                )
-                print_running_reward, print_running_episodes = 0.0, 0
+            # if time_step % print_freq == 0:
+            #     if print_running_episodes > 0:
+            #         print_avg_reward = print_running_reward / print_running_episodes
+            #     else:
+            #         print_avg_reward = 0
+            #     print(
+            #         f"Episode : {i_episode} \t\t"
+            #         f"Timestep : {time_step} \t\t"
+            #         f"Average Reward : {round(print_avg_reward, 2)}"
+            #     )
+            #     print_running_reward, print_running_episodes = 0.0, 0
 
-            # Save model checkpoint
+            # # Save model checkpoint
             if time_step % save_model_freq == 0:
                 agent.save(checkpoint_path)
-                print("Model saved at timestep:", time_step)
+            #     print("Model saved at timestep:", time_step)
 
             if done:
                 break
@@ -295,7 +295,7 @@ if __name__ == "__main__":
         convergence_threshold=200,
     )
 
-    with open("saved_metrics/metrics_ppo_safe.pkl", "wb") as f:
+    with open("saved_metrics/metrics_ppo_safe_wind.pkl", "wb") as f:
         pickle.dump(metrics_ppo_safe, f)
 
     metrics_ppo_gae = train(
@@ -307,5 +307,5 @@ if __name__ == "__main__":
         convergence_threshold=200,
     )
 
-    with open("saved_metrics/metrics_ppo_gae.pkl", "wb") as f:
+    with open("saved_metrics/metrics_ppo_gae_wind.pkl", "wb") as f:
         pickle.dump(metrics_ppo_gae, f)

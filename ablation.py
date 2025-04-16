@@ -5,14 +5,15 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.linear_model import LinearRegression
 import sys
+
 sys.path.insert(0, "PPO_agents")
 from datetime import datetime
 
-from PPO import PPO
-from PPO_MINI import PPO as PPO_MINI
-from PPO_MINI_GAE import PPO as PPO_MINI_GAE
+# from PPO import PPO
+# from PPO_MINI import PPO as PPO_MINI
+# from PPO_MINI_GAE import PPO as PPO_MINI_GAE
 from PPO_GAE import PPO as PPO_GAE
-from SAFE_PPO_2 import PPO as PPO_SAFE
+from SAFE_PPO import PPO as PPO_SAFE
 
 from rocket import Rocket
 
@@ -117,6 +118,7 @@ def train(
 
     # Main training loop
     pbar = tqdm(total=max_training_timesteps, desc="Training Timesteps")
+    agent.set_lr(lr_actor_start, lr_critic_start)
 
     while time_step <= max_training_timesteps:
         state = env.reset()
@@ -144,6 +146,8 @@ def train(
                 if agent.name == "PPO_GAE":
                     avg_gae_return = agent.update()
                     gae_returns_list.append(avg_gae_return)
+                else:
+                    agent.update()
 
             # Logging to file
             if time_step % log_freq == 0:
@@ -170,9 +174,9 @@ def train(
             #     print_running_reward, print_running_episodes = 0.0, 0
 
             # # Save model checkpoint
-            # if time_step % save_model_freq == 0:
-            #     agent.save(checkpoint_path)
-            #     print("Model saved at timestep:", time_step)
+            if time_step % save_model_freq == 0:
+                agent.save(checkpoint_path)
+                print("Model saved at timestep:", time_step)
 
             if done:
                 break
@@ -239,6 +243,7 @@ def train(
 
     return metrics
 
+
 if __name__ == "__main__":
     # State and action dimensions
     state_dim = env.state_dims
@@ -272,19 +277,18 @@ if __name__ == "__main__":
         lam=lam,
     )
 
-
     ppo_safe_agent = PPO_SAFE(
         state_dim=state_dim,
         action_dim=action_dim,
         lr_actor=lr_actor,
         lr_critic=lr_critic,
         gamma=gamma,
-        cost_gamma = 0.99,
+        cost_gamma=0.99,
         K_epochs=K_epochs,
         eps_clip=eps_clip,
         has_continuous_action_space=has_continuous_action_space,
     )
-            
+
     metrics_ppo_safe = train(
         ppo_safe_agent,
         env,
@@ -293,10 +297,10 @@ if __name__ == "__main__":
         max_training_timesteps=6e6,
         convergence_threshold=200,
     )
-    
+
     with open("saved_metrics/metrics_ppo_safe.pkl", "wb") as f:
         pickle.dump(metrics_ppo_safe, f)
-    
+
     metrics_ppo_gae = train(
         ppo_gae_agent,
         env,
@@ -305,6 +309,6 @@ if __name__ == "__main__":
         max_training_timesteps=6e6,
         convergence_threshold=200,
     )
-        
+
     with open("saved_metrics/metrics_ppo_gae.pkl", "wb") as f:
         pickle.dump(metrics_ppo_gae, f)
